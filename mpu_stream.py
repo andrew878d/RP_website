@@ -57,4 +57,55 @@ html_dashboard = """
         }
 
         // 2. When the Pi responds, process data and calculate lag immediately
-        socket.on('
+        socket.on('telemetry_response', function(data) {
+            // Update the UI Accelerometer values
+            document.getElementById('x_val').innerText = data.x.toFixed(2);
+            document.getElementById('y_val').innerText = data.y.toFixed(2);
+            document.getElementById('z_val').innerText = data.z.toFixed(2);
+            
+            // Lag Math: (Current Time Right Now - Original Mac Timestamp) / 2
+            let roundTripTime = Date.now() - data.client_timestamp;
+            let oneWayLag = roundTripTime / 2;
+            
+            document.getElementById('lag_val').innerText = oneWayLag.toFixed(1);
+
+            // Wait 50ms (20Hz sampling rate) then request the next frame
+            setTimeout(pullTelemetry, 50);
+        });
+
+        // Start the loop automatically upon establishing connection
+        socket.on('connect', function() {
+            pullTelemetry();
+        });
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(html_dashboard)
+
+# 4. Listen for the Mac's pull requests
+@socketio.on('request_telemetry')
+def handle_telemetry_request(client_timestamp):
+    try:
+        # Pull instant hardware register states from MPU6050
+        accel_x, accel_y, accel_z = mpu.acceleration
+        
+        payload = {
+            'x': accel_x,
+            'y': accel_y,
+            'z': accel_z,
+            'client_timestamp': client_timestamp  # Bounce the timestamp straight back
+        }
+    except Exception as e:
+        payload = {'x': 0, 'y': 0, 'z': 0, 'client_timestamp': client_timestamp}
+        print(f"I2C Read Error: {e}")
+
+    # Send data packet back to the client request origin
+    socketio.emit('telemetry_response', payload)
+
+if __name__ == '__main__':
+    print("Launching Integrated Telemetry & Latency Server...")
+    socketio.run(app, host='0.0.0.0', port=8080)
